@@ -1,5 +1,12 @@
 // CORE LAYER: shopping list and budget (pure).
 
+// How much of a recipe a session needs. Breakfasts and snacks are cooked in batches (e.g. 8 servings) and a
+// session only eats its own days, so it takes that share of the batch. Lunch and dinner are cooked whole.
+export function snackAmount(recipe, servings) {
+  if (recipe.type === "main") return 1;            // lunch and dinner are cooked whole, once per session
+  return servings / recipe.yield;                  // breakfast, snack and drink batches are shared across the session
+}
+
 // One consolidated list for the whole plan.
 // Breakfast, snack and drink repeat for every day of a session; lunch and dinner are cooked once per session.
 export function buildShoppingList(plan, recipes, ingredients) {
@@ -9,9 +16,9 @@ export function buildShoppingList(plan, recipes, ingredients) {
   };
   for (const s of plan.sessions) {
     const servings = s.days.length;
-    add(s.dishes.breakfast, servings);
-    add(s.dishes.snack, servings);
-    add(s.dishes.drink, servings);
+    add(s.dishes.breakfast, snackAmount(recipes[s.dishes.breakfast], servings));
+    add(s.dishes.snack, snackAmount(recipes[s.dishes.snack], servings));
+    add(s.dishes.drink, snackAmount(recipes[s.dishes.drink], servings));
     add(s.dishes.lunch, 1);
     add(s.dishes.dinner, 1);
   }

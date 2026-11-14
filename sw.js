@@ -1,11 +1,11 @@
 // Service worker: caches the app shell so it works offline.
-const CACHE = "meal-mate-v6";
+const CACHE = "meal-mate-v14";
 const ASSETS = [
   "./", "index.html", "styles.css", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png",
   "src/main.js",
   "src/data/catalog.js", "src/data/config.js", "src/data/storage.js",
-  "src/core/dates.js", "src/core/matching.js", "src/core/nutrition.js", "src/core/planner.js", "src/core/shopping.js",
+  "src/core/dates.js", "src/core/nutrition.js", "src/core/planner.js", "src/core/shopping.js",
   "src/app/controller.js",
   "src/ui/format.js", "src/ui/views.js"
 ];

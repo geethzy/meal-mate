@@ -3,17 +3,17 @@
 import { generatePlan } from "../core/planner.js";
 import { addDays, todayISO } from "../core/dates.js";
 import { dayNutrition } from "../core/nutrition.js";
-import { buildShoppingList, tripSummary } from "../core/shopping.js";
-import { matchFoods } from "../core/matching.js";
+import { buildShoppingList, tripSummary, snackAmount } from "../core/shopping.js";
 
 const MEALS = [["breakfast", "Breakfast"], ["lunch", "Lunch"], ["dinner", "Dinner"], ["snack", "Snack"], ["drink", "Hot drink"]];
 const SECTIONS = ["protein", "pantry", "produce"];
-const LIKE_FIELDS = [
-  ["breakfast", "Breakfast", "e.g. porridge, egg toast"],
-  ["lunch", "Lunch", "e.g. chicken and rice"],
-  ["dinner", "Dinner", "e.g. fish curry"],
-  ["snack", "Snacks", "e.g. chocolate chip oat cookies"],
-  ["drink", "Hot drinks", "e.g. hot fruit ade, coffee, milk tea"]
+// Meal groups in the builder. Lunch and dinner both draw from the shared "main" dishes.
+const MEAL_FIELDS = [
+  ["breakfast", "Breakfast", "breakfast"],
+  ["lunch", "Lunch", "main"],
+  ["dinner", "Dinner", "main"],
+  ["snack", "Snacks", "snack"],
+  ["drink", "Hot drinks", "drink"]
 ];
 
 /**
@@ -23,8 +23,9 @@ export function createController({ catalog, config, store, rng = Math.random, no
   const { RECIPES, INGREDIENTS, GROUPS } = catalog;
   // record = { plan, checks: { days, shop, cook }, actuals, trip } or null
   let record = store.load();
-  const prefs = store.loadPrefs();              // { likes: { breakfast: "text", ... } }, kept across plans
-  const ui = { tab: "plan", section: "protein", cookId: null, dish: "lunch" };
+  const prefs = store.loadPrefs();              // { picks: { breakfast: [dishId], ... } }, kept across plans
+  const ui = { tab: "plan", section: "protein", cookId: null, dish: "lunch", draft: { name: "", category: "lunch", description: "" }, draftError: "" };
+  let dishes = store.loadDishes();              // dishes you added yourself
 
   const emptyRecord = (plan) => ({ plan, checks: { days: [], shop: [], cook: [] }, actuals: {}, trip: false });
   const save = () => store.save(record);
@@ -39,15 +40,15 @@ export function createController({ catalog, config, store, rng = Math.random, no
     return now() > addDays(record.plan.startDate, 13) ? "ended" : "active";
   }
 
+  // Dropdown options and the dishes already picked for each meal
   function builderView() {
-    const groups = LIKE_FIELDS.map(([key, label, placeholder]) => {
-      const text = prefs.likes[key];
-      const m = matchFoods(text, RECIPES, key);
-      return {
-        key, label, placeholder, text,
-        matched: m.matched.map((id) => ({ id, name: RECIPES[id].name })),
-        unmatched: m.unmatched
-      };
+    const groups = MEAL_FIELDS.map(([key, label, type]) => {
+      const options = Object.entries(RECIPES)
+        .filter(([, r]) => r.type === type)
+        .map(([id, r]) => ({ id, name: r.name }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      const picks = (prefs.picks[key] || []).filter((id) => RECIPES[id]).map((id) => ({ id, name: RECIPES[id].name }));
+      return { key, label, options, picks };
     });
     return { groups, canCreate: true };
   }
@@ -68,6 +69,7 @@ export function createController({ catalog, config, store, rng = Math.random, no
     return {
       ...base,
       hasPlan: true,
+      picks: { used: plan.favUsed || 0, total: plan.favTotal || 0 },
       start: plan.startDate,
       end: addDays(plan.startDate, 13),
       doneDays: checks.days.length,
@@ -105,7 +107,7 @@ export function createController({ catalog, config, store, rng = Math.random, no
     });
     const dishKey = dishes.some((d) => d.key === ui.dish) ? ui.dish : "lunch";
     const R = RECIPES[current.dishes[dishKey]];
-    const mult = R.yield > 1 ? 1 : current.days.length;   // per-serving dishes repeat for each day
+    const mult = snackAmount(R, current.days.length);   // amounts for this session only
     const first = current.days[0], last = current.days[current.days.length - 1];
 
     return {
@@ -120,7 +122,7 @@ export function createController({ catalog, config, store, rng = Math.random, no
         dish: {
           name: R.name,
           time: R.time,
-          forText: R.yield > 1 ? `${R.yield} portions` : `${current.days.length} servings (days ${first}–${last})`,
+          forText: R.yield === 1 ? `${current.days.length} servings (days ${first}–${last})` : R.type !== "main" ? `${current.days.length} servings from a batch of ${R.yield} (days ${first}–${last})` : `${R.yield} portions`,
           desc: R.desc,
           ingredients: Object.entries(R.ing).map(([id, qty]) => ({
             name: INGREDIENTS[id].name,
@@ -142,12 +144,18 @@ export function createController({ catalog, config, store, rng = Math.random, no
       case "tab":
         ui.tab = p.tab;
         break;
-      case "set-likes":
-        prefs.likes[p.type] = String(p.value || "").slice(0, 300);
+      case "add-pick":
+        if (p.value && RECIPES[p.value] && !prefs.picks[p.type].includes(p.value)) {
+          prefs.picks[p.type].push(p.value);
+          store.savePrefs(prefs);
+        }
+        break;
+      case "remove-pick":
+        prefs.picks[p.type] = prefs.picks[p.type].filter((id) => id !== p.id);
         store.savePrefs(prefs);
         break;
       case "generate": {
-        const favourites = Object.fromEntries(builderView().groups.map((g) => [g.key, g.matched.map((m) => m.id)]));
+        const favourites = prefs.picks;
         record = emptyRecord(generatePlan({
           recipes: RECIPES, ingredients: INGREDIENTS, favourites,
           startISO: addDays(now(), 1), config, rng
@@ -157,6 +165,23 @@ export function createController({ catalog, config, store, rng = Math.random, no
         save();
         break;
       }
+      case "draft":
+        if (p.field in ui.draft) ui.draft[p.field] = String(p.value || "");
+        ui.draftError = "";
+        break;
+      case "save-dish": {
+        const name = ui.draft.name.trim(), description = ui.draft.description.trim();
+        if (!name) { ui.draftError = "Please enter a name for the dish."; break; }
+        dishes = [...dishes, { id: "u" + Date.now(), name, category: ui.draft.category, description }];
+        store.saveDishes(dishes);
+        ui.draft = { name: "", category: ui.draft.category, description: "" };
+        ui.draftError = "";
+        break;
+      }
+      case "delete-dish":
+        dishes = dishes.filter((d) => d.id !== p.id);
+        store.saveDishes(dishes);
+        break;
       case "toggle-day":
         if (record) { toggle(record.checks.days, Number(p.n)); save(); }
         break;
@@ -209,7 +234,7 @@ export function createController({ catalog, config, store, rng = Math.random, no
   }
 
   function view() {
-    return { ui: { ...ui }, plan: planView(), grocery: groceryView(), cook: cookView() };
+    return { ui: { ...ui, draft: { ...ui.draft } }, plan: planView(), grocery: groceryView(), cook: cookView(), dishes: { list: dishes, draft: ui.draft, error: ui.draftError } };
   }
 
   return { dispatch, view };

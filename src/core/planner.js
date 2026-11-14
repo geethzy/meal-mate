@@ -1,8 +1,11 @@
 // CORE LAYER: builds a new two-week plan.
 // Each cook session covers 4 days (2 for the last one). Within a session the breakfast, snack,
-// hot drink, lunch and dinner are the same. Foods the user likes are placed first in their group.
-// Several random candidates are generated and the best is kept: sugar and fat are hard limits,
-// protein and fiber are pushed up, and cost is a tie-breaker.
+// hot drink, lunch and dinner are the same.
+// The user's picks are preferred. Several candidate plans are generated, each using a random
+// number of the picks, and the best is kept:
+//   - sugar and fat over their limits are heavy penalties (hard limits)
+//   - going over the budget is a heavy penalty, so cheaper dishes replace picks when needed
+//   - each pick used is a small bonus, so the app keeps as many picks as the budget allows
 import { addDays } from "./dates.js";
 import { dayNutrition, averageNutrition } from "./nutrition.js";
 import { buildShoppingList, budgetSummary } from "./shopping.js";
@@ -16,19 +19,24 @@ function shuffle(arr, rng) {
   return a;
 }
 
+// Returns a pool for one slot: some of the picks (a random number, from none to all), then everything else
+function slotPool(all, picks, rng) {
+  const keep = rng() < 0.5 ? picks.length : Math.floor(rng() * (picks.length + 1));
+  const used = shuffle(picks, rng).slice(0, keep);
+  return [...used, ...shuffle(all.filter((id) => !used.includes(id)), rng)];
+}
+
 function buildCandidate({ recipes, favourites, startISO, config, rng }) {
-  // Liked dishes first (in random order among themselves), then the rest of the catalogue
-  const pick = (type) => {
-    const all = Object.keys(recipes).filter((id) => recipes[id].type === type);
-    const favs = (favourites[type] || []).filter((id) => recipes[id] && recipes[id].type === type);
-    const rest = all.filter((id) => !favs.includes(id));
-    return [...shuffle(favs, rng), ...shuffle(rest, rng)];
-  };
-  const breakfasts = pick("breakfast");
-  const lunches = pick("lunch");
-  const dinners = pick("dinner");
-  const drinks = pick("drink");
-  const snacks = pick("snack");
+  const ids = (type) => Object.keys(recipes).filter((id) => recipes[id].type === type);
+  const mainIds = ids("main");
+  const picks = (slot) => (favourites[slot] || []).filter((id) => recipes[id]);
+
+  const breakfasts = slotPool(ids("breakfast"), picks("breakfast"), rng);
+  const snacks = slotPool(ids("snack"), picks("snack"), rng);
+  const drinks = slotPool(ids("drink"), picks("drink"), rng);
+  const lunches = slotPool(mainIds, picks("lunch"), rng);
+  // A dinner never repeats a lunch of the same plan
+  const dinners = slotPool(mainIds.filter((id) => !lunches.slice(0, config.sessionSizes.length).includes(id)), picks("dinner"), rng);
 
   let cookDay = 1;
   const sessions = config.sessionSizes.map((size, i) => {
@@ -60,7 +68,7 @@ function buildCandidate({ recipes, favourites, startISO, config, rng }) {
 }
 
 // Lower is better
-function scorePlan(plan, recipes, ingredients, config) {
+function scorePlan(plan, recipes, ingredients, config, favUsed) {
   const avg = averageNutrition(plan.days.map((d) => dayNutrition(d, recipes, ingredients)));
   const t = config.targets;
   const sugarOver = Math.max(0, avg.sugar - t.sugar.max);
@@ -68,25 +76,29 @@ function scorePlan(plan, recipes, ingredients, config) {
   const proteinShort = Math.max(0, t.protein.min - avg.protein);
   const fiberShort = Math.max(0, t.fiber.min - avg.fiber);
   const cost = budgetSummary(buildShoppingList(plan, recipes, ingredients), config).total;
-  const overBudget = Math.max(0, cost - config.budget.fortnight);   // the plan must stay within the budget
-  return 1000 * (sugarOver + fatOver) + 20 * (proteinShort + fiberShort) + 5 * overBudget + cost / 200;
+  const overBudget = Math.max(0, cost - config.budget.fortnight);
+  return 1000 * (sugarOver + fatOver) + 20 * (proteinShort + fiberShort) + 5 * overBudget + cost / 200 - 25 * favUsed;
 }
 
 /**
  * @param {object} opts
  * @param {object} opts.recipes      RECIPES
  * @param {object} opts.ingredients  INGREDIENTS
- * @param {object} [opts.favourites] { breakfast: [recipeId], lunch: [...], ... } foods the user likes
+ * @param {object} [opts.favourites] { breakfast: [id], lunch: [id], dinner: [id], snack: [id], drink: [id] } the user's picks
  * @param {string} opts.startISO     first day of the plan (YYYY-MM-DD)
  * @param {object} opts.config       CONFIG
  * @param {function} [opts.rng]      random source returning 0..1
+ * @returns {object} plan, with favUsed (picks used) and favTotal (picks made)
  */
 export function generatePlan({ recipes, ingredients, favourites = {}, startISO, config, rng = Math.random }) {
+  const allPicks = new Set(Object.values(favourites).flat().filter((id) => recipes[id]));
   let best = null, bestScore = Infinity;
   for (let i = 0; i < config.candidates; i++) {
     const plan = buildCandidate({ recipes, favourites, startISO, config, rng });
-    const score = scorePlan(plan, recipes, ingredients, config);
-    if (score < bestScore) { best = plan; bestScore = score; }
+    const used = new Set(plan.sessions.flatMap((s) => Object.values(s.dishes)).filter((id) => allPicks.has(id)));
+    const score = scorePlan(plan, recipes, ingredients, config, used.size);
+    if (score < bestScore) { best = { ...plan, favUsed: used.size }; bestScore = score; }
   }
+  best.favTotal = allPicks.size;
   return best;
 }

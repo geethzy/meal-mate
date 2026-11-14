@@ -4,16 +4,20 @@ import { esc, lkr, num, qty, homeQty, date } from "./format.js";
 const ICON = {
   pot: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11h16v4.5a4.5 4.5 0 0 1-4.5 4.5h-7A4.5 4.5 0 0 1 4 15.5z"/><path d="M2.5 12.5h1.5M20 12.5h1.5M7 4c0 1.2 1 1.2 1 2.4M11 4c0 1.2 1 1.2 1 2.4M15 4c0 1.2 1 1.2 1 2.4"/></svg>`,
   calendar: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg>`,
+  plus: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>`,
   cart: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2.2l2.3 11h10.4l2-8H6.4"/><circle cx="9.5" cy="19.5" r="1.4"/><circle cx="17" cy="19.5" r="1.4"/></svg>`
 };
 const TABS = [
   { key: "plan", label: "Plan", icon: ICON.calendar },
   { key: "grocery", label: "Grocery", icon: ICON.cart },
-  { key: "cook", label: "Cook", icon: ICON.pot }
+  { key: "cook", label: "Cook", icon: ICON.pot },
+  { key: "dishes", label: "Add dish", icon: ICON.plus }
 ];
 
+const DISH_CATEGORIES = [["breakfast", "Breakfast"], ["lunch", "Lunch"], ["dinner", "Dinner"], ["snack", "Snack"], ["drink", "Hot drink"]];
+
 export function page(vm) {
-  const screen = { plan: planScreen, grocery: groceryScreen, cook: cookScreen }[vm.ui.tab](vm);
+  const screen = { plan: planScreen, grocery: groceryScreen, cook: cookScreen, dishes: dishesScreen }[vm.ui.tab](vm);
   const canNew = vm.plan.status !== "active";
   return `
     <header class="top">
@@ -31,6 +35,43 @@ export function page(vm) {
 
 const noPlan = () => `<section class="card empty"><p>No active plan. Create one on the <b>Plan</b> tab.</p></section>`;
 
+// ---------- Add dish ----------
+function dishesScreen(vm) {
+  const d = vm.dishes;
+  const catLabel = Object.fromEntries(DISH_CATEGORIES);
+  return `
+    <h2>Add a dish</h2>
+    <section class="card">
+      <label class="like-label" for="dish-name"><b>Dish name</b></label>
+      <input id="dish-name" class="inp full" type="text" value="${esc(d.draft.name)}" maxlength="80"
+        placeholder="e.g. Salmon rice bowl" data-action="draft" data-field="name" autocomplete="off">
+
+      <label class="like-label" for="dish-cat"><b>Category</b></label>
+      <select id="dish-cat" class="inp full" data-action="draft" data-field="category">
+        ${DISH_CATEGORIES.map(([k, l]) => `<option value="${k}" ${d.draft.category === k ? "selected" : ""}>${l}</option>`).join("")}
+      </select>
+
+      <label class="like-label" for="dish-desc"><b>Description</b></label>
+      <textarea id="dish-desc" class="inp full recipe-box" rows="6" maxlength="4000"
+        placeholder="What is it, roughly what goes in it, any notes" data-action="draft" data-field="description">${esc(d.draft.description)}</textarea>
+
+      ${d.error ? `<p class="off small">${esc(d.error)}</p>` : ""}
+      <button class="btn full big-btn" data-action="save-dish">Save dish</button>
+      <p class="muted small">Saved as a memo on this phone. Nothing is added to the recipe list yet. Export the memo to add dishes in bulk later.</p>
+    </section>
+
+    <div class="row between"><h2>Memo (${d.list.length})</h2>${d.list.length ? `<button class="btn ghost small-btn" data-action="export-dishes">Export memo</button>` : ""}</div>
+    ${d.list.length ? d.list.map((x) => `
+      <section class="card">
+        <div class="row between">
+          <span class="tag">${esc(catLabel[x.category] || x.category)}</span>
+          <button class="btn ghost small-btn" data-action="delete-dish" data-id="${x.id}">Delete</button>
+        </div>
+        <div class="rname">${esc(x.name)}</div>
+        <p class="small recipe-text">${esc(x.description)}</p>
+      </section>`).join("") : `<section class="card empty"><p>No dishes yet.</p></section>`}`;
+}
+
 // ---------- Plan ----------
 function planScreen(vm) {
   const p = vm.plan;
@@ -38,6 +79,7 @@ function planScreen(vm) {
     const left = p.days.length;
     return `
       <p class="meta">${date(p.start)} to ${date(p.end)} · ${left} day${left === 1 ? "" : "s"} left · ${p.doneDays} done</p>
+      ${p.picks && p.picks.total ? `<p class="meta">${p.picks.used} of your ${p.picks.total} picks used${p.picks.used < p.picks.total ? " · the rest were swapped to stay within budget" : ""}</p>` : ""}
       ${left ? p.days.map(day).join("") : `<section class="card notice"><b>All 14 days are done.</b>
          <div class="muted small">Create the next plan when you are ready.</div></section>`}
       ${p.doneDays ? `<div class="center"><button class="btn ghost" data-action="restore-days">Restore ${p.doneDays} finished day${p.doneDays === 1 ? "" : "s"}</button></div>` : ""}`;
@@ -52,15 +94,19 @@ function planScreen(vm) {
 
 function builder(b) {
   return `
-    <h2>What do you like to eat?</h2>
-    <p class="muted small">Type the foods you enjoy for each meal, separated by commas. They go into your plan first. Leave a box empty to use the catalogue.</p>
+    <h2>Choose your dishes</h2>
+    <p class="muted small">Pick the dishes you want for each meal from the list. Leave a meal empty and the app chooses for you. If your picks go over LKR 15,000, the app swaps in cheaper dishes and uses as few of your picks as it needs.</p>
     ${b.groups.map((g) => `
       <section class="card">
-        <label class="like-label" for="like-${g.key}"><b>${esc(g.label)}</b></label>
-        <input id="like-${g.key}" class="inp full" type="text" value="${esc(g.text)}" placeholder="${esc(g.placeholder)}"
-          data-action="set-likes" data-type="${g.key}" autocomplete="off" autocapitalize="off">
-        ${g.matched.length ? `<div class="matched">${g.matched.map((m) => `<span class="tag">✓ ${esc(m.name)}</span>`).join("")}</div>` : ""}
-        ${g.unmatched.length ? `<p class="off small">Not in the catalogue yet: ${g.unmatched.map(esc).join(", ")}. The plan will use catalogue dishes for these.</p>` : ""}
+        <div class="row between"><b>${esc(g.label)}</b><span class="small muted">${g.picks.length} picked</span></div>
+        <select class="inp full" data-action="add-pick" data-type="${g.key}" aria-label="Add a ${esc(g.label)} dish">
+          <option value="">Choose a dish…</option>
+          ${g.options.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}
+        </select>
+        ${g.picks.length ? `<div class="matched">${g.picks.map((p) => `
+          <span class="tag pick">${esc(p.name)}
+            <button class="x" data-action="remove-pick" data-type="${g.key}" data-id="${p.id}" aria-label="Remove ${esc(p.name)}">✕</button>
+          </span>`).join("")}</div>` : ""}
       </section>`).join("")}
     <button class="btn full big-btn" data-action="generate">Create plan</button>`;
 }

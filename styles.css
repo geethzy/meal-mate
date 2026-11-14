@@ -122,3 +122,13 @@ body[data-tab="cook"]    { --g: #B5523B; --g-soft: #F9ECE8; }
 .item .small-btn { padding: 8px 12px; font-size: 13px; flex: none; }
 .item .strong { white-space: nowrap; }
 .item.got .iname { text-decoration: none; color: var(--ink); }
+
+/* Dish picks */
+.tag.pick { display: inline-flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; font-size: 13px; padding: 4px 6px 4px 10px; }
+.tag.pick .x { border: 0; background: none; color: var(--g); font-size: 13px; padding: 0 2px; cursor: pointer; }
+
+/* Add dish tab */
+body[data-tab="dishes"] { --g: #6B4E9B; --g-soft: #F3EFF9; }
+.tabs button[data-tab="dishes"] { --t: #6B4E9B; }
+.recipe-box { resize: vertical; font-family: inherit; line-height: 1.45; }
+.recipe-text { white-space: pre-wrap; margin: 6px 0 0; }
