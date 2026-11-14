@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Meal Mate</title>
   <meta name="theme-color" content="#ffffff">
+  <meta name="color-scheme" content="light">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Meal Mate">
@@ -12,13 +13,27 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
   <link rel="stylesheet" href="styles.css">
+  <!-- Fallback colours: stay readable even if styles.css does not load (dark mode would otherwise show black) -->
+  <style>html,body{background:#fff;color:#1C2A22;font:16px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;margin:0}</style>
 </head>
 <body>
-  <div id="app"></div>
+  <div id="app"><p style="padding:24px;color:#7B8A82">Loading Meal Mate…</p></div>
+  <script>
+    // If the app fails to start, show the error on screen instead of a blank page
+    window.addEventListener("error", function (e) {
+      var box = document.getElementById("app");
+      if (box && !box.dataset.ok) {
+        box.innerHTML = '<div style="padding:24px"><b>Meal Mate could not start.</b><p style="color:#7B8A82">' +
+          (e.message || "Unknown error") + '</p><p style="color:#7B8A82">Try closing the app and opening it again. If that fails, clear the website data for this site in Settings → Safari.</p></div>';
+      }
+    });
+  </script>
   <script type="module" src="src/main.js"></script>
   <script>
     if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+      window.addEventListener("load", function () {
+        navigator.serviceWorker.register("sw.js").catch(function () {});
+      });
     }
   </script>
 </body>
