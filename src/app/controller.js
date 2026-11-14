@@ -3,7 +3,7 @@
 import { generatePlan } from "../core/planner.js";
 import { addDays, todayISO } from "../core/dates.js";
 import { dayNutrition } from "../core/nutrition.js";
-import { buildShoppingList, budgetSummary } from "../core/shopping.js";
+import { buildShoppingList, tripSummary } from "../core/shopping.js";
 import { matchFoods } from "../core/matching.js";
 
 const MEALS = [["breakfast", "Breakfast"], ["lunch", "Lunch"], ["dinner", "Dinner"], ["snack", "Snack"], ["drink", "Hot drink"]];
@@ -13,7 +13,7 @@ const LIKE_FIELDS = [
   ["lunch", "Lunch", "e.g. chicken and rice"],
   ["dinner", "Dinner", "e.g. fish curry"],
   ["snack", "Snacks", "e.g. chocolate chip oat cookies"],
-  ["drink", "Hot drinks", "e.g. ginger tea, coffee"]
+  ["drink", "Hot drinks", "e.g. hot fruit ade, coffee, milk tea"]
 ];
 
 /**
@@ -21,11 +21,12 @@ const LIKE_FIELDS = [
  */
 export function createController({ catalog, config, store, rng = Math.random, now = () => todayISO() }) {
   const { RECIPES, INGREDIENTS, GROUPS } = catalog;
-  let record = store.load();                    // { plan, checks: { days, shop, cook }, actuals } or null
+  // record = { plan, checks: { days, shop, cook }, actuals, trip } or null
+  let record = store.load();
   const prefs = store.loadPrefs();              // { likes: { breakfast: "text", ... } }, kept across plans
   const ui = { tab: "plan", section: "protein", cookId: null, dish: "lunch" };
 
-  const emptyRecord = (plan) => ({ plan, checks: { days: [], shop: [], cook: [] }, actuals: {} });
+  const emptyRecord = (plan) => ({ plan, checks: { days: [], shop: [], cook: [] }, actuals: {}, trip: false });
   const save = () => store.save(record);
   const toggle = (list, value) => {
     const i = list.indexOf(value);
@@ -38,7 +39,6 @@ export function createController({ catalog, config, store, rng = Math.random, no
     return now() > addDays(record.plan.startDate, 13) ? "ended" : "active";
   }
 
-  // The foods typed for each meal, matched to catalogue dishes
   function builderView() {
     const groups = LIKE_FIELDS.map(([key, label, placeholder]) => {
       const text = prefs.likes[key];
@@ -58,19 +58,20 @@ export function createController({ catalog, config, store, rng = Math.random, no
     const base = { status: st, builder: builderView() };
     if (!record) return { ...base, hasPlan: false };
     const { plan, checks } = record;
+    // Days ticked as done leave the list
+    const days = plan.days.filter((d) => !checks.days.includes(d.n)).map((d) => ({
+      n: d.n,
+      date: d.date,
+      meals: MEALS.map(([key, label]) => ({ key, label, name: RECIPES[d.meals[key]].name })),
+      nutrition: dayNutrition(d, RECIPES, INGREDIENTS)
+    }));
     return {
       ...base,
       hasPlan: true,
       start: plan.startDate,
       end: addDays(plan.startDate, 13),
       doneDays: checks.days.length,
-      days: plan.days.map((d) => ({
-        n: d.n,
-        date: d.date,
-        done: checks.days.includes(d.n),
-        meals: MEALS.map(([key, label]) => ({ key, label, name: RECIPES[d.meals[key]].name })),
-        nutrition: dayNutrition(d, RECIPES, INGREDIENTS)
-      }))
+      days
     };
   }
 
@@ -78,19 +79,19 @@ export function createController({ catalog, config, store, rng = Math.random, no
     if (!record) return { hasPlan: false };
     const list = shoppingList();
     const { actuals, checks } = record;
+    const bought = checks.shop;
+    const toBuy = list.filter((i) => !bought.includes(i.id));
     return {
       hasPlan: true,
-      budget: budgetSummary(list, config, actuals),
-      done: checks.shop.length,
-      total: list.length,
+      started: record.trip,
+      summary: tripSummary(list, config, actuals, bought),
       active: ui.section,
       sections: SECTIONS.map((g) => ({
         key: g,
         title: GROUPS[g],
-        items: list.filter((i) => i.group === g).map((i) => ({
-          ...i, done: checks.shop.includes(i.id), paid: actuals[i.id] ?? null
-        }))
-      }))
+        items: toBuy.filter((i) => i.group === g).map((i) => ({ ...i, paid: actuals[i.id] ?? null }))
+      })),
+      bought: list.filter((i) => bought.includes(i.id)).map((i) => ({ ...i, paid: actuals[i.id] ?? i.cost }))
     };
   }
 
@@ -159,11 +160,30 @@ export function createController({ catalog, config, store, rng = Math.random, no
       case "toggle-day":
         if (record) { toggle(record.checks.days, Number(p.n)); save(); }
         break;
-      case "toggle-shop":
-        if (record) { toggle(record.checks.shop, p.id); save(); }
+      case "restore-days":
+        if (record) { record.checks.days = []; save(); }
         break;
-      case "toggle-cook":
-        if (record) { toggle(record.checks.cook, p.id); save(); }
+      case "start-shopping":
+        if (record) {
+          record.trip = true;
+          record.checks.shop = [];   // paid starts at zero
+          record.actuals = {};
+          save();
+        }
+        break;
+      case "reset-shopping":
+        if (record) {
+          record.trip = false;
+          record.checks.shop = [];
+          record.actuals = {};
+          save();
+        }
+        break;
+      case "buy":
+        if (record && record.trip && !record.checks.shop.includes(p.id)) { record.checks.shop.push(p.id); save(); }
+        break;
+      case "unbuy":
+        if (record) { toggle(record.checks.shop, p.id); save(); }
         break;
       case "set-price":
         if (record) {
@@ -172,6 +192,9 @@ export function createController({ catalog, config, store, rng = Math.random, no
           else delete record.actuals[p.id];
           save();
         }
+        break;
+      case "toggle-cook":
+        if (record) { toggle(record.checks.cook, p.id); save(); }
         break;
       case "select-section":
         ui.section = p.key;

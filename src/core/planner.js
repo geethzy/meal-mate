@@ -68,7 +68,8 @@ function scorePlan(plan, recipes, ingredients, config) {
   const proteinShort = Math.max(0, t.protein.min - avg.protein);
   const fiberShort = Math.max(0, t.fiber.min - avg.fiber);
   const cost = budgetSummary(buildShoppingList(plan, recipes, ingredients), config).total;
-  return 1000 * (sugarOver + fatOver) + 20 * (proteinShort + fiberShort) + cost / 200;
+  const overBudget = Math.max(0, cost - config.budget.fortnight);   // the plan must stay within the budget
+  return 1000 * (sugarOver + fatOver) + 20 * (proteinShort + fiberShort) + 5 * overBudget + cost / 200;
 }
 
 /**

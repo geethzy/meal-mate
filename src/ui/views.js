@@ -35,9 +35,12 @@ const noPlan = () => `<section class="card empty"><p>No active plan. Create one 
 function planScreen(vm) {
   const p = vm.plan;
   if (p.status === "active") {
+    const left = p.days.length;
     return `
-      <p class="meta">${date(p.start)} to ${date(p.end)} · ${p.doneDays} of 14 days done</p>
-      ${p.days.map(day).join("")}`;
+      <p class="meta">${date(p.start)} to ${date(p.end)} · ${left} day${left === 1 ? "" : "s"} left · ${p.doneDays} done</p>
+      ${left ? p.days.map(day).join("") : `<section class="card notice"><b>All 14 days are done.</b>
+         <div class="muted small">Create the next plan when you are ready.</div></section>`}
+      ${p.doneDays ? `<div class="center"><button class="btn ghost" data-action="restore-days">Restore ${p.doneDays} finished day${p.doneDays === 1 ? "" : "s"}</button></div>` : ""}`;
   }
   const notice = p.status === "ended"
     ? `<section class="card notice"><b>Your plan has ended.</b>
@@ -64,10 +67,10 @@ function builder(b) {
 
 function day(d) {
   return `
-    <article class="card day ${d.done ? "done" : ""}">
+    <article class="card day">
       <div class="row between">
         <div><b>Day ${d.n}</b> <span class="muted small">${date(d.date)}</span></div>
-        <label class="check"><input type="checkbox" data-action="toggle-day" data-n="${d.n}" ${d.done ? "checked" : ""}> Done</label>
+        <label class="check"><input type="checkbox" data-action="toggle-day" data-n="${d.n}"> Day done</label>
       </div>
       <ul class="meals">
         ${d.meals.map((m) => `<li><span class="k">${m.label}</span>${esc(m.name)}</li>`).join("")}
@@ -76,52 +79,76 @@ function day(d) {
     </article>`;
 }
 
-// ---------- Grocery ----------
+// ---------- Grocery (live shopping trip) ----------
 function groceryScreen(vm) {
   const g = vm.grocery;
   if (!g.hasPlan) return noPlan();
-  const b = g.budget;
-  const idx = g.sections.findIndex((s) => s.key === g.active);
-  const sec = g.sections[idx];
-  const pct = g.total ? Math.round((g.done / g.total) * 100) : 0;
-  const over = b.remaining < 0;
-  const prev = g.sections[(idx + 2) % 3].key, next = g.sections[(idx + 1) % 3].key;
-
-  return `
+  const s = g.summary;
+  const over = s.left < 0;
+  const budgetCard = `
     <section class="card budget">
-      <div class="kv"><span>Estimate before prices</span><span>${lkr(b.estimate)}</span></div>
-      <div class="kv"><span>Paid so far (${b.priced} of ${b.count} priced)</span><span>${lkr(b.spent)}</span></div>
-      <div class="kv"><span>Projected total</span><span>${lkr(b.total)}</span></div>
-      <div class="kv strong"><span>Against ${lkr(b.target)}</span>
-        <span class="${over ? "off" : "ok"}">${over ? lkr(-b.remaining) + " over" : lkr(b.remaining) + " left"}</span></div>
-      <p class="muted small">Projected total uses the price you paid where entered and estimates for the rest. Pantry top-up and 10% contingency are included.</p>
-    </section>
+      <div class="kv strong"><span>Budget</span><span>${lkr(s.budget)}</span></div>
+      <div class="kv"><span>Spent (bought)</span><span>${lkr(s.spent)}</span></div>
+      <div class="kv"><span>To buy (your prices or estimates)</span><span>${lkr(s.toBuy)}</span></div>
+      <div class="kv"><span>Spice and pantry top-up</span><span>${lkr(s.pantry)}</span></div>
+      <div class="kv"><span>Contingency (10%)</span><span>${lkr(s.contingency)}</span></div>
+      <div class="kv"><span>Projected total</span><span>${lkr(s.total)}</span></div>
+      <div class="kv strong"><span>Left in budget</span><span class="${over ? "off" : "ok"}">${over ? lkr(-s.left) + " over" : lkr(s.left)}</span></div>
+    </section>`;
+
+  if (!g.started) {
+    return `
+      ${budgetCard}
+      <section class="card notice">
+        <b>Ready to shop?</b>
+        <div class="muted small">Starting a trip sets paid to zero. As you put each item in the trolley, tap Bought and it leaves the list.</div>
+        <button class="btn full big-btn" data-action="start-shopping">Start shopping</button>
+      </section>`;
+  }
+
+  const idx = g.sections.findIndex((x) => x.key === g.active);
+  const sec = g.sections[idx];
+  const prev = g.sections[(idx + 2) % 3].key, next = g.sections[(idx + 1) % 3].key;
+  return `
+    ${budgetCard}
 
     <div class="seg" role="tablist">
-      ${g.sections.map((s) => `
-        <button data-action="select-section" data-key="${s.key}" class="${s.key === g.active ? "on" : ""}">${esc(s.title)}</button>`).join("")}
+      ${g.sections.map((x) => `
+        <button data-action="select-section" data-key="${x.key}" class="${x.key === g.active ? "on" : ""}">${esc(x.title)}</button>`).join("")}
     </div>
-
     <div class="stepper">
       <button class="btn ghost" data-action="select-section" data-key="${prev}">‹ Previous</button>
-      <span class="muted small">Section ${idx + 1} of ${g.sections.length} · ${g.done} of ${g.total} bought (${pct}%)</span>
+      <span class="muted small">Section ${idx + 1} of 3 · ${s.boughtCount} of ${s.count} bought</span>
       <button class="btn ghost" data-action="select-section" data-key="${next}">Next ›</button>
     </div>
 
-    <h2>${esc(sec.title)}</h2>
-    <section class="card list">
+    <h2>${esc(sec.title)} to buy</h2>
+    ${sec.items.length ? `<section class="card list">
       ${sec.items.map((i) => `
-        <div class="item ${i.done ? "got" : ""}">
-          <input type="checkbox" data-action="toggle-shop" data-id="${i.id}" ${i.done ? "checked" : ""} aria-label="Bought ${esc(i.name)}">
+        <div class="item">
           <div class="grow">
             <div class="iname">${esc(i.name)}</div>
             <small>${qty(i.unit, i.qty)} · est. ${lkr(i.cost)}</small>
           </div>
-          <input class="inp price" type="number" inputmode="decimal" min="0" step="1" placeholder="paid"
-            value="${i.paid ?? ""}" data-action="set-price" data-id="${i.id}" aria-label="Amount paid for ${esc(i.name)} in LKR">
+          <input class="inp price" type="number" inputmode="decimal" min="0" step="1" placeholder="${i.cost}"
+            value="${i.paid ?? ""}" data-action="set-price" data-id="${i.id}" aria-label="Price paid for ${esc(i.name)}">
+          <button class="btn small-btn" data-action="buy" data-id="${i.id}">Bought</button>
         </div>`).join("")}
-    </section>
-    <p class="muted small">Type the amount you paid for each item (LKR) and press Enter or tap away. Leave blank to keep the estimate.</p>`;
+    </section>` : `<section class="card empty"><p>Nothing left in this section.</p></section>`}
+
+    ${g.bought.length ? `
+      <h2>Bought (${g.bought.length})</h2>
+      <section class="card list">
+        ${g.bought.map((i) => `
+          <div class="item got">
+            <div class="grow"><div class="iname">${esc(i.name)}</div><small>${qty(i.unit, i.qty)}</small></div>
+            <span class="strong">${lkr(i.paid)}</span>
+            <button class="btn ghost small-btn" data-action="unbuy" data-id="${i.id}">Undo</button>
+          </div>`).join("")}
+      </section>` : ""}
+
+    <p class="muted small">Enter the price you paid before tapping Bought. If you leave it blank, the estimate is used.</p>
+    <div class="center"><button class="btn ghost" data-action="reset-shopping">End trip and reset</button></div>`;
 }
 
 // ---------- Cook ----------

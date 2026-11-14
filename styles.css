@@ -116,3 +116,9 @@ body[data-tab="cook"]    { --g: #B5523B; --g-soft: #F9ECE8; }
 .matched { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .matched .tag { text-transform: none; letter-spacing: 0; font-size: 12px; }
 .inp.full { width: 100%; font-size: 16px; padding: 10px 12px; }
+
+/* Shopping trip */
+.item .price { width: 84px; }
+.item .small-btn { padding: 8px 12px; font-size: 13px; flex: none; }
+.item .strong { white-space: nowrap; }
+.item.got .iname { text-decoration: none; color: var(--ink); }

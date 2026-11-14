@@ -45,3 +45,24 @@ export function budgetSummary(list, config, actuals = {}) {
     spent, priced, count: list.length, monthly: b.month
   };
 }
+
+// Live shopping trip. Items you have bought leave the to-buy list and count as spent.
+// Unbought items count at the price you typed, or the estimate if none. Pantry top-up and contingency apply.
+export function tripSummary(list, config, actuals, bought) {
+  const b = config.budget;
+  let spent = 0, toBuy = 0, boughtCount = 0;
+  for (const i of list) {
+    const paid = actuals[i.id] ?? i.cost;
+    if (bought.includes(i.id)) { spent += paid; boughtCount++; }
+    else toBuy += paid;
+  }
+  const subtotal = spent + toBuy + b.pantryTopUp;
+  const contingency = Math.round(subtotal * b.contingencyRate);
+  const total = subtotal + contingency;
+  return {
+    budget: b.fortnight,
+    spent: Math.round(spent), toBuy: Math.round(toBuy), pantry: b.pantryTopUp,
+    contingency, total, left: b.fortnight - total,
+    boughtCount, count: list.length
+  };
+}
