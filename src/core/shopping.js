@@ -1,0 +1,47 @@
+// CORE LAYER: shopping list and budget (pure).
+
+// One consolidated list for the whole plan.
+// Breakfast, snack and drink repeat for every day of a session; lunch and dinner are cooked once per session.
+export function buildShoppingList(plan, recipes, ingredients) {
+  const need = {};
+  const add = (rid, mult) => {
+    for (const [id, qty] of Object.entries(recipes[rid].ing)) need[id] = (need[id] || 0) + qty * mult;
+  };
+  for (const s of plan.sessions) {
+    const servings = s.days.length;
+    add(s.dishes.breakfast, servings);
+    add(s.dishes.snack, servings);
+    add(s.dishes.drink, servings);
+    add(s.dishes.lunch, 1);
+    add(s.dishes.dinner, 1);
+  }
+  return Object.entries(need)
+    .map(([id, q]) => {
+      const I = ingredients[id];
+      const qty = I.unit === "pc" ? Math.ceil(q) : Math.round(q);
+      return { id, name: I.name, unit: I.unit, group: I.group, qty, cost: Math.round(qty * I.price) };
+    })
+    .sort((a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name));
+}
+
+// Budget. Items you have priced use the price you paid; the rest use estimates.
+// actuals: { [ingredientId]: LKR paid for the quantity on the list }
+export function budgetSummary(list, config, actuals = {}) {
+  const b = config.budget;
+  const estimate = list.reduce((s, i) => s + i.cost, 0);
+  let items = 0, spent = 0, priced = 0;
+  for (const i of list) {
+    const paid = actuals[i.id];
+    if (paid != null) { items += paid; spent += paid; priced++; }
+    else items += i.cost;
+  }
+  const pantry = b.pantryTopUp;
+  const contingency = Math.round((items + pantry) * b.contingencyRate);
+  const total = items + pantry + contingency;
+  return {
+    estimate: Math.round((estimate + pantry) * (1 + b.contingencyRate)),
+    items, pantry, contingency, total,
+    target: b.fortnight, remaining: b.fortnight - total,
+    spent, priced, count: list.length, monthly: b.month
+  };
+}
